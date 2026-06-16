@@ -94,9 +94,118 @@
 
 ---
 
+## 2026-06-16 — 模块 2.2.3 AI 评测触发与任务管理模块 `eval`
+
+### 目标
+
+根据开发文档 2.2.3 节实现 AI 评测触发与任务管理模块，包含教师端分布式锁防重触发、配额控制与模型降级、Redis 任务状态机流转、异步任务投递 FastAPI、评审结果发布等功能。
+
+### 新增文件
+
+| 文件路径 | 说明 |
+|:---|:---|
+| `dto/EvalTriggerRequest.java` | AI 评测触发请求体：`courseId`、`studentNo`（选填，为空则批量）、`stageNum`、`isJointReview` |
+| `dto/EvalPublishRequest.java` | 评审结果发布请求体：`studentNo`、`courseId`、`stageNum` |
+| `dto/TaskStatusResponse.java` | 任务状态响应体：`taskId`、`status`、`statusText`、`errorMsg`、`studentNo`、`stageNum` |
+| `dto/EvalReportResponse.java` | 评审报告响应体：含 AI 原始分数/报告 + 教师修改后分数/报告 |
+| `config/AiServiceConfig.java` | FastAPI 算法服务配置类，从 `ai-service.*` 读取地址和配额 |
+| `config/RestTemplateConfig.java` | RestTemplate 配置，连接超时 5s，读取超时 300s |
+| `service/EvalService.java` | 评测服务接口：`triggerEval`、`getTaskStatus`、`publishResult`、`getReport`、`getReportsByCourseAndStage` |
+| `service/impl/EvalServiceImpl.java` | 评测服务实现（详见下方核心设计） |
+| `controller/EvalController.java` | 评测控制器，5 个 REST 接口 |
+
+### 改动文件
+
+| 文件 | 改动要点 |
+|:---|:---|
+| `resources/application.yml` | 新增 `ai-service` 配置段：`base-url`、`submit-path`、`health-path`、`daily-quota` |
+
+### 接口定义
+
+| 接口 | 方法 | 路径 | 说明 |
+|:---|:---|:---|:---|
+| 触发 AI 评测 | `POST` | `/api/eval/trigger` | 教师触发全班/单人 AI 评测，投递异步任务给 FastAPI |
+| 查询任务状态 | `GET` | `/api/task/status/{task_id}` | 前端轮询，返回 Redis 中任务状态机当前值 |
+| 发布评审结果 | `POST` | `/api/eval/publish` | 教师确认下发，状态变更为 `3-已下发` |
+| 获取评审报告 | `GET` | `/api/eval/report/{student_no}/{course_id}/{stage}` | 获取单个学生的 AI 评语（含教师修改后版本） |
+| 获取课程报告列表 | `GET` | `/api/eval/reports/{course_id}/{stage}` | 获取课程某阶段所有学生的评测报告 |
+
+### 核心设计
+
+**教师端分布式锁**：
+- Key: `neusoft:lock:teacher_eval:{student_no}:{course_id}:{stage_num}`
+- 策略: `tryLock(wait=5s, lease=180s)`（考虑 AI+OCR 链路耗时，自动过期防死锁）
+- 目的: 防止同组教师或重复点击触发同一条 AI 任务
+
+**配额控制与降级**：
+- Key: `neusoft:quota:deepseek:date:{yyyyMMdd}`（Redis INCR 计数器，TTL 24h）
+- 每次触发前检查当日已用配额，超出阈值时写入 `neusoft:config:model_fallback = "local"`
+- FastAPI 算法服务读取降级标识后自动路由到本地 Ollama 模型
+
+**Redis 任务状态机**：
+- Key: `neusoft:task:status:{task_id}`（Hash，TTL 24h）
+- 状态流转: `10(等待)` → `20(OCR)` → `30(RAG)` → `40(LLM)` → `50(完成)`，`-1(失败)`
+- FastAPI 异步执行期间逐级更新状态，前端轮询渲染多阶段进度条
+
+**Redis 任务状态 → MySQL 业务状态映射**：
+- Redis `10/20/30/40` → MySQL `1`（AI 评测中）
+- Redis `50` → MySQL `2`（待发布，由 FastAPI 同步更新）
+- Redis `-1` → MySQL 保持 `1` 或回退 `0`（由业务逻辑决定）
+
+**批量触发流程**：
+1. 查询该课程该阶段所有 `status=0` 的提交记录
+2. 逐条获取 Redisson 分布式锁 → 校验状态 → 更新 MySQL 状态为 1
+3. 生成 UUID `task_id` → 初始化 Redis 状态机 → 投递 HTTP POST 给 FastAPI
+4. 返回已触发数量、task_id 列表、跳过的学生列表
+
+### 测试方式
+
+- 教师登录后发送 `POST /api/eval/trigger` 触发评测
+- 使用 `GET /api/task/status/{task_id}` 轮询任务进度
+- 检查 `t_submission_stage` 表 `status` 字段变化
+- 使用 `POST /api/eval/publish` 下发评审结果，验证状态变为 3
+- 使用 `GET /api/eval/report/{student_no}/{course_id}/{stage}` 获取报告
+
+---
+
+## 2026-06-16 — 模块 2.2.4 评语微调与分数管理模块 `review`
+
+### 目标
+
+根据开发文档 2.2.4 节实现评语微调与分数管理模块，教师可在 AI 评测完成后（status=2）在线修改 Markdown 评语和分数。
+
+### 新增文件
+
+| 文件路径 | 说明 |
+|:---|:---|
+| `dto/ReviewCommentRequest.java` | 教师修改评语请求体：`studentNo`、`courseId`、`stageNum`、`finalReportMarkdown` |
+| `dto/ReviewScoreRequest.java` | 教师修改分数请求体：`studentNo`、`courseId`、`stageNum`、`teacherScore` |
+| `service/ReviewService.java` | 评语微调服务接口：`saveComment`、`saveScore` |
+| `service/impl/ReviewServiceImpl.java` | 评语微调服务实现：状态校验 + 直接覆盖写入 |
+| `controller/ReviewController.java` | 评语微调控制器，2 个 REST 接口 |
+
+### 接口定义
+
+| 接口 | 方法 | 路径 | 说明 |
+|:---|:---|:---|:---|
+| 保存教师修改评语 | `PUT` | `/api/review/comment` | 直接覆盖 `t_submission_stage.final_report_markdown` |
+| 保存教师最终分数 | `PUT` | `/api/review/score` | 直接覆盖 `t_submission_stage.teacher_score` |
+
+### 核心设计
+
+- 前提条件：提交记录状态必须为 `2`（AI 评测完成/待发布），否则拒绝修改
+- 每次修改直接覆盖原值，不保留历史版本（可未来扩展 `t_review_history` 表）
+- 分数校验范围：0-100
+
+### 测试方式
+
+- 确保提交记录 status=2，发送 `PUT /api/review/comment` 修改评语
+- 发送 `PUT /api/review/score` 修改分数，验证 teacher_score 已更新
+- 尝试对 status≠2 的记录修改，验证被拒绝
+
+---
+
 ## 后续待实现模块
 
-- 2.2.3 AI 评测触发与任务管理模块 `eval`
-- 2.2.4 评语微调与分数管理模块 `review`
 - 2.2.5 用户与课程管理模块 `user`
 - 4.3 评分标准上传接口（Milvus 相关）

@@ -1,7 +1,9 @@
+com/neusoft/grading/dto/ReviewCommentRequest.class
 com/neusoft/grading/service/TeacherService.class
 com/neusoft/grading/controller/StudentCourseController.class
 com/neusoft/grading/controller/TeacherController.class
 com/neusoft/grading/dto/EvalReportResponse$EvalReportResponseBuilder.class
+com/neusoft/grading/controller/ReviewController.class
 com/neusoft/grading/service/TokenService.class
 com/neusoft/grading/dto/TaskStatusResponse$TaskStatusResponseBuilder.class
 com/neusoft/grading/entity/Teacher.class
@@ -17,6 +19,7 @@ com/neusoft/grading/dto/EvalTriggerRequest.class
 com/neusoft/grading/dto/LoginResponse.class
 com/neusoft/grading/service/impl/FileServiceImpl.class
 com/neusoft/grading/common/GlobalExceptionHandler.class
+com/neusoft/grading/service/impl/ReviewServiceImpl.class
 com/neusoft/grading/service/impl/StudentCourseServiceImpl.class
 com/neusoft/grading/service/SubmissionStageService.class
 com/neusoft/grading/service/FileService.class
@@ -56,6 +59,8 @@ com/neusoft/grading/mapper/StudentMapper.class
 com/neusoft/grading/filter/TokenAuthFilter.class
 com/neusoft/grading/dto/FileUploadRequest.class
 com/neusoft/grading/controller/CourseProjectController.class
+com/neusoft/grading/service/ReviewService.class
+com/neusoft/grading/dto/ReviewScoreRequest.class
 com/neusoft/grading/service/impl/TeacherServiceImpl.class
 com/neusoft/grading/entity/Student.class
 com/neusoft/grading/service/impl/EvalServiceImpl.class

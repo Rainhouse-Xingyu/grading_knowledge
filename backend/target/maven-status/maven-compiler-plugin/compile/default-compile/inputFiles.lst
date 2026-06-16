@@ -1,6 +1,7 @@
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/controller/SubmissionStageController.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/common/Result.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/service/impl/AuthServiceImpl.java
+/Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/dto/EvalTriggerRequest.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/service/SubmissionStageService.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/config/MyBatisPlusConfig.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/entity/SubmissionStage.java
@@ -8,9 +9,12 @@
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/controller/StudentCourseController.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/entity/Teacher.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/service/impl/StudentServiceImpl.java
+/Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/dto/TaskStatusResponse.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/entity/StudentCourse.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/config/MinioConfig.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/service/AuthService.java
+/Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/config/RestTemplateConfig.java
+/Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/service/impl/EvalServiceImpl.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/mapper/StudentCourseMapper.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/service/TeacherService.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/GradingApplication.java
@@ -18,14 +22,17 @@
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/mapper/CourseProjectMapper.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/service/impl/FileServiceImpl.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/service/FileService.java
+/Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/config/AiServiceConfig.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/service/impl/CourseProjectServiceImpl.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/service/impl/TeacherServiceImpl.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/service/impl/StudentCourseServiceImpl.java
+/Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/dto/EvalPublishRequest.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/mapper/StudentMapper.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/mapper/TeacherMapper.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/mapper/SubmissionStageMapper.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/controller/StudentController.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/service/CasService.java
+/Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/dto/EvalReportResponse.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/controller/FileController.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/dto/UserInfoResponse.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/service/impl/TokenServiceImpl.java
@@ -47,3 +54,5 @@
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/controller/AuthController.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/service/CourseProjectService.java
 /Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/entity/Student.java
+/Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/service/EvalService.java
+/Users/xingyuzhao/Code/grading_knowledge/backend/src/main/java/com/neusoft/grading/controller/EvalController.java

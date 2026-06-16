@@ -73,3 +73,23 @@ logging:
   level:
     com.neusoft.grading: debug
     org.springframework.security: info
+# CAS 统一身份认证
+cas:
+  server-url: https://cas.neusoft.edu.cn
+  service-name: http://localhost:8080
+  login-url: https://cas.neusoft.edu.cn/login?service=http://localhost:8080
+  logout-url: https://cas.neusoft.edu.cn/logout?service=http://localhost:8080
+  mock: true  # 开发模式 true，生产环境改为 false
+
+# FastAPI AI 算法服务
+ai-service:
+  base-url: http://localhost:8000
+  submit-path: /ai/eval/submit
+  health-path: /ai/health
+  daily-quota: 500
+
+# 日志
+logging:
+  level:
+    com.neusoft.grading: debug
+    org.springframework.security: info

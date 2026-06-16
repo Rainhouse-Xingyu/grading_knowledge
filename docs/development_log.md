@@ -205,7 +205,108 @@
 
 ---
 
+## 2026-06-16 — 模块 2.2.5 用户与课程管理模块 `user`
+
+### 目标
+
+根据开发文档 2.2.5 节实现用户与课程管理模块，教师查看课程学生列表、学生三阶段进度、期末总分查询。
+
+### 新增文件
+
+| 文件路径 | 说明 |
+|:---|:---|
+| `dto/CourseStudentResponse.java` | 课程学生信息响应：学号、姓名、班级、三阶段状态概览 |
+| `dto/StudentProgressResponse.java` | 学生三阶段进度响应：含嵌套 `StageDetail` 内部类 |
+| `dto/FinalScoreResponse.java` | 期末总分响应：finalScore、teacherFinalComment、gradeStatus |
+| `service/UserQueryService.java` | 用户查询服务接口：`getCourseStudents`、`getStudentProgress`、`getFinalScore` |
+| `service/impl/UserQueryServiceImpl.java` | 用户查询服务实现：多表联合查询 + 数据组装 |
+| `controller/UserController.java` | 用户控制器，3 个 REST 接口 |
+
+### 接口定义
+
+| 接口 | 方法 | 路径 | 说明 |
+|:---|:---|:---|:---|
+| 获取课程学生列表 | `GET` | `/api/user/students/{course_id}` | JOIN t_student_course + t_student + t_submission_stage |
+| 获取学生三阶段状态 | `GET` | `/api/user/progress/{student_no}/{course_id}` | 查询 t_submission_stage 三条记录 |
+| 获取期末总分 | `GET` | `/api/user/final-score/{student_no}/{course_id}` | 查询 t_student_course |
+
+### 核心设计
+
+**课程学生列表**：
+1. 先查 t_student_course 获取选课学号列表
+2. 批量查 t_student 补全学生基本信息
+3. 查 t_submission_stage 获取各阶段提交状态
+4. 组装为 CourseStudentResponse 返回
+
+**学生三阶段进度**：
+- 查询 t_submission_stage 该学生该课程的全部记录（按 stageNum 排序）
+- 返回每阶段的 status、aiScore、teacherScore、时间戳等
+
+**期末总分访问控制**：
+- 教师可查看所有状态
+- 学生仅可查看 grade_status=1（已下发）的总分
+
+### 测试方式
+
+- 教师登录后访问 `GET /api/user/students/{courseId}` 查看全班学生和三阶段状态
+- 访问 `GET /api/user/progress/{studentNo}/{courseId}` 查看单个学生详细进度
+- 访问 `GET /api/user/final-score/{studentNo}/{courseId}` 查看期末总分
+- 学生登录后尝试查看未发布的总分，验证被拒绝
+
+---
+
+## 2026-06-16 — 模块 4.3 评分标准上传接口
+
+### 目标
+
+根据开发文档 4.3 节实现评分标准上传接口，教师上传评分标准文档后存储到 MinIO，后续由 FastAPI 算法服务切片 + Embedding 写入 Milvus。
+
+### 新增文件
+
+| 文件路径 | 说明 |
+|:---|:---|
+| `dto/StandardUploadRequest.java` | 评分标准上传请求体：`courseId`、`stage`（0-通用/1-3阶段）、`file` |
+| `dto/StandardInfoResponse.java` | 评分标准信息响应：`courseId`、`standardDocUrl`、`chunkCount`、`teacherNo` |
+| `service/StandardService.java` | 评分标准服务接口：`uploadStandard`、`getStandardInfo` |
+| `service/impl/StandardServiceImpl.java` | 评分标准服务实现：MinIO 上传 + 课程关联 + FastAPI 触发（桩） |
+| `controller/StandardController.java` | 评分标准控制器，2 个 REST 接口 |
+
+### 接口定义
+
+| 接口 | 方法 | 路径 | 说明 |
+|:---|:---|:---|:---|
+| 上传评分标准文档 | `POST` | `/api/standard/upload` | multipart/form-data，支持 .docx / .pdf / .txt |
+| 查询已上传标准 | `GET` | `/api/standard/list/{course_id}` | 返回文档路径和切片数 |
+
+### 核心设计
+
+**上传流程**：
+1. 校验文件格式（.docx / .pdf / .txt）
+2. 校验课程存在且属于当前教师
+3. UUID 混淆路径后上传到 MinIO（`standards/{course_id}/{uuid}.ext`）
+4. 更新 t_course_project.standard_doc_url
+5. 触发 FastAPI 进行文档切片 + Embedding 写入 Milvus（桩实现，待 FastAPI 端完成）
+
+**Milvus 集合设计（grading_standards）**：
+- chunk_id: INT64 主键，自动递增
+- vector: FLOAT_VECTOR(1024)，bge-large-zh-v1.5 生成
+- course_id: VARCHAR(32)，标量索引
+- stage: INT32，标量索引（0=通用 / 1-3=各阶段）
+- content: VARCHAR(4000)，原始评分规则文本
+
+**待实现**：
+- FastAPI 端 `/ai/standard/process` 接口（文档解析 + 切片 + Embedding + Milvus 写入）
+- Milvus Java SDK 集成（查询切片数量）
+
+### 测试方式
+
+- 教师登录后使用 `POST /api/standard/upload` 上传评分标准文档
+- 验证 MinIO 中文件已存储，t_course_project.standard_doc_url 已更新
+- 使用 `GET /api/standard/list/{courseId}` 查询评分标准信息
+
+---
+
 ## 后续待实现模块
 
-- 2.2.5 用户与课程管理模块 `user`
-- 4.3 评分标准上传接口（Milvus 相关）
+- FastAPI AI/OCR 算法服务模块（Python 端）
+- 前端 Vue 3 模块

@@ -1,7 +1,7 @@
 # 双轨制 AI 评分系统 — 开发文档
 
-> **版本**：V3（教师管控版）
-> **生成日期**：2026-06-15
+> **版本**：V3.1（教师管控版 + 本地认证 + Docker 部署）
+> **生成日期**：2026-06-22
 > **架构**：Spring Boot（主业务） + Redis（状态/并发控制） + Python FastAPI（AI/OCR服务）
 
 ---
@@ -15,6 +15,8 @@
 - [5. 存储与缓存模块（MinIO / MySQL / Redis）](#5-存储与缓存模块minio--mysql--redis)
 - [6. 基础设施与部署](#6-基础设施与部署)
 - [7. 依赖版本汇总表](#7-依赖版本汇总表)
+- [附录：本地登录认证系统](#附录本地登录认证系统)
+- [附录：Docker 一键部署](#附录docker-一键部署)
 
 ---
 
@@ -36,11 +38,23 @@
 
 ### 1.2 功能子模块
 
-#### 1.2.1 CAS 登录模块
+#### 1.2.1 认证登录模块
+系统支持两种认证方式，前端通过登录页选择：
+
+**方式一：CAS 统一身份认证（学校官方）**
 - 拦截学校 CAS 回调地址，提取 `ticket` 参数
 - 向后端 `POST /api/auth/cas/callback` 换取自定义 `Access-Token`
 - `Access-Token` 存入 `localStorage`，Axios 拦截器自动注入 `Authorization` 请求头
-- **路由守卫**：未登录用户（无 Token）强制跳转 CAS 登录页
+
+**方式二：本地账号密码登录（本系统独立）**
+- 用户通过登录页表单输入用户名和密码
+- 向后端 `POST /api/auth/login` 换取自定义 `Access-Token`
+- 登录流程复用 CAS 登录的 Token 会话管理机制，后续接口调用完全一致
+- 前端登录页提供「CAS 登录」和「本地登录」标签切换
+- **密码安全要求**：8-64 位，必须包含大小写字母和数字
+- **暴力破解防护**：连续 5 次失败自动锁定账户 30 分钟
+
+**路由守卫**：未登录用户（无 Token）强制跳转登录页
 
 #### 1.2.2 学生提交面板
 - 文件上传组件（Element Plus `el-upload`），限制 `.zip` 格式，最大 100MB
@@ -86,11 +100,18 @@
 #### 2.2.1 认证授权模块 `auth`
 | 接口 | 方法 | 路径 | 说明 |
 |:---|:---|:---|:---|
-| CAS 回调 | `POST` | `/api/auth/cas/callback` | 接收 `ticket`，验证后生成自定义 JWT Token |
+| 本地登录 | `POST` | `/api/auth/login` | 用户名+密码登录，支持暴力破解防护 |
+| 注册本地用户 | `POST` | `/api/auth/register` | 管理员注册本地用户（关联 student/teacher） |
+| 修改密码 | `POST` | `/api/auth/change-password` | 登录用户修改自己的密码 |
+| 查询锁定状态 | `GET` | `/api/auth/lock-status` | 查询账户是否被锁定及剩余时间 |
+| CAS 回调 | `POST` | `/api/auth/cas/callback` | 接收 `ticket`，验证后生成自定义 Token |
 | 登出 | `POST` | `/api/auth/logout` | 清除 Redis 会话，返回 CAS 登出重定向 URL |
 | 获取用户信息 | `GET` | `/api/auth/me` | 返回当前用户角色（student/teacher）及基本信息 |
 
-**数据持久化**：CAS 返回的学生 9 项字段写入 `t_student` 表，教师 6 项字段写入 `t_teacher` 表（首次登录 INSERT，后续登录 UPDATE 同步）。
+**数据持久化**：
+- CAS 登录：学生 9 项字段写入 `t_student` 表，教师 6 项字段写入 `t_teacher` 表（首次 INSERT，后续 UPDATE）
+- 本地登录：用户凭证写入 `t_local_user` 表，密码使用 BCrypt（cost=12）加盐哈希，永不明文存储
+- `t_local_user.user_no` 逻辑关联 `t_student.student_no` 或 `t_teacher.teacher_no`
 
 #### 2.2.2 文件上传与管理模块 `file`
 | 接口 | 方法 | 路径 | 说明 |
@@ -484,31 +505,108 @@ t_student (PK: student_no)
 | MinIO | 1 | 本地私有化部署，单节点即可 |
 | Ollama | 1（GPU 推荐） | 本地私有化降级模型，显存需求 ≥16GB（14B 模型） |
 
-### 6.2 Docker Compose 建议
+### 6.2 Docker 一键部署（当前推荐方案）
 
-```yaml
-# 基础设施服务（参考）
-services:
-  mysql:
-    image: mysql:8.0
-    ports: ["3306:3306"]
-    environment:
-      MYSQL_ROOT_PASSWORD: <password>
-      MYSQL_DATABASE: neusoft_grading
+完整的 `docker-compose.yml` 位于项目根目录，实现"一条命令启动全部服务"。
 
-  redis:
-    image: redis:7.2
-    ports: ["6379:6379"]
-    command: redis-server --appendonly yes
+#### 快速启动
 
-  minio:
-    image: minio/minio:RELEASE.2024-05-10T01-41-38Z
-    ports: ["9000:9000", "9001:9001"]
-    command: server /data --console-address ":9001"
+```bash
+# 1. 克隆项目
+git clone <repo-url> && cd grading_knowledge
 
-  milvus:
-    image: milvusdb/milvus:v2.4.1
-    ports: ["19530:19530"]
+# 2. 配置环境变量（修改 DeepSeek API Key 等）
+cp .env.example .env
+
+# 3. 一键启动所有服务
+docker compose up -d
+
+# 4. 访问系统
+#    前端页面:     http://localhost
+#    API 文档:     http://localhost/doc.html
+#    MinIO 控制台: http://localhost:9001
+```
+
+#### 服务架构
+
+```mermaid
+graph LR
+    subgraph 基础设施层
+        MySQL -->|数据持久化| Backend
+        Redis -->|会话/锁/任务状态| Backend
+        Redis -->|任务状态/降级开关| AI
+        MinIO -->|文件存储| Backend
+        MinIO -->|文件读取| AI
+        Milvus -->|向量检索| AI
+    end
+    subgraph 业务层
+        Backend[Spring Boot<br/>端口 8080] -->|投递 AI 任务| AI[FastAPI AI 服务<br/>端口 8000]
+    end
+    subgraph 接入层
+        Nginx[端口 80] -->|反向代理 /api/*| Backend
+        Nginx -->|反向代理 /ai/*| AI
+        Nginx -->|静态资源| Frontend[Vue 3 前端]
+    end
+    Frontend --> Nginx
+    User((用户)) --> Nginx
+```
+
+#### 服务列表
+
+| 容器名 | 镜像 | 端口映射 | 健康检查 |
+|:---|:---|:---|:---|
+| `grading-mysql` | mysql:8.0 | 3306 | mysqladmin ping |
+| `grading-redis` | redis:7.2-alpine | 6379 | redis-cli ping |
+| `grading-minio` | minio/minio | 9000(API)/9001(控制台) | mc ready |
+| `grading-milvus` | milvusdb/milvus:v2.4.1 | 19530 | /healthz |
+| `grading-backend` | 本地构建 | 8080 | Spring Boot Actuator |
+| `grading-ai-service` | 本地构建 | 8000 | FastAPI /ai/health |
+| `grading-frontend` | 本地构建 | 80 (Nginx) | Nginx 默认 |
+
+#### 数据持久化
+
+| 数据卷 | 挂载服务 | 存储内容 |
+|:---|:---|:---|
+| `mysql-data` | MySQL | 数据库文件 |
+| `redis-data` | Redis | AOF 持久化文件 |
+| `minio-data` | MinIO | 学生提交文件 |
+| `milvus-data` | Milvus | 向量索引数据 |
+
+#### 环境变量说明（.env 文件）
+
+```bash
+# MySQL 密码
+MYSQL_ROOT_PASSWORD=NeusoftGrading@2026
+
+# DeepSeek API（必须配置，否则 AI 判分不可用）
+DEEPSEEK_API_KEY=your_deepseek_api_key_here
+
+# MinIO
+MINIO_ROOT_USER=minioadmin
+MINIO_ROOT_PASSWORD=minioadmin@2026
+```
+
+#### 管理命令
+
+```bash
+# 查看运行状态
+docker compose ps
+
+# 查看日志（按服务筛选）
+docker compose logs -f backend
+docker compose logs -f ai-service
+
+# 重启单个服务
+docker compose restart backend
+
+# 停止所有服务（保留数据卷）
+docker compose down
+
+# 停止并清理数据（慎用：删除所有数据卷）
+docker compose down -v
+
+# 重新构建镜像
+docker compose build --no-cache backend
 ```
 
 ---
@@ -571,6 +669,220 @@ services:
 | Milvus | `2.4.1+` (standalone) | Docker Compose |
 | Ollama | `最新稳定版` | Docker / 物理机（需 GPU） |
 | Nginx | `1.25+` | 前端静态资源托管 + 反向代理 |
+
+---
+
+## 附录：本地登录认证系统
+
+### 设计目标
+
+在与学校 CAS 统一身份认证并行的前提下，为本系统提供独立的用户名密码登录方式，
+满足以下场景：
+- 校外用户或合作院校教师无需 CAS 账号即可使用系统
+- 系统管理员独立管理，不依赖学校统一身份认证
+- CAS 服务不可用时的应急登录通道
+
+### 安全设计
+
+| 安全措施 | 实现方式 |
+|:---|:---|
+| 密码存储 | BCrypt 加盐哈希（cost factor = 12），永不明文留存 |
+| 暴力破解防护 | Redis 记录连续失败次数 ≥ 5 次，锁定账户 30 分钟 |
+| 账户禁用 | 管理员可手动锁定账户（status=1），彻底禁止登录 |
+| 密码强度 | 8-64 位，必须包含大小写字母和数字 |
+| 防枚举攻击 | 不存在的用户名也记录失败计数，返回统一错误信息 |
+| 登录传输 | 强制 HTTPS（生产环境） |
+
+### 数据库表 `t_local_user`
+
+```sql
+CREATE TABLE `t_local_user` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `username` varchar(32) NOT NULL COMMENT '登录用户名（全局唯一）',
+  `password_hash` varchar(100) NOT NULL COMMENT 'BCrypt哈希后的密码',
+  `role` varchar(16) NOT NULL COMMENT '角色: student/teacher/admin',
+  `user_no` varchar(32) DEFAULT NULL COMMENT '关联用户编号',
+  `status` tinyint NOT NULL DEFAULT '0' COMMENT '账户状态: 0-正常, 1-锁定',
+  `login_fail_count` int NOT NULL DEFAULT '0' COMMENT '连续登录失败次数',
+  `locked_until` datetime DEFAULT NULL COMMENT '账户锁定截止时间',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `last_login_time` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_username` (`username`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='本地登录用户表';
+```
+
+### 接口说明
+
+| 端点 | 方法 | 认证要求 | 说明 |
+|:---|:---|:---|:---|
+| `/api/auth/login` | POST | 无（公开） | 用户名+密码登录，返回 Token |
+| `/api/auth/register` | POST | 需管理员 Token | 注册本地用户 |
+| `/api/auth/change-password` | POST | 需登录 Token | 修改当前用户密码 |
+| `/api/auth/lock-status` | GET | 无（公开） | 查询账户锁定剩余秒数 |
+
+### 核心源码架构
+
+```
+backend/src/main/java/com/neusoft/grading/
+  ├── entity/LocalUser.java          # 实体类（MyBatis-Plus）
+  ├── mapper/LocalUserMapper.java    # 数据访问层
+  ├── dto/
+  │   ├── LocalLoginRequest.java     # 登录请求 DTO
+  │   ├── LocalRegisterRequest.java  # 注册请求 DTO
+  │   └── ChangePasswordRequest.java # 改密请求 DTO
+  ├── config/PasswordConfig.java     # BCrypt PasswordEncoder Bean
+  ├── service/LocalAuthService.java  # 业务接口
+  └── service/impl/LocalAuthServiceImpl.java  # 业务实现（含暴力破解防护）
+```
+
+### 错误码
+
+| HTTP 状态码 | code | message |
+|:---|:---|:---|
+| 401 | 401 | 用户名或密码错误 |
+| 401 | 401 | 账户已锁定，请 N 分钟后再试 |
+| 401 | 401 | 账户已被管理员禁用 |
+| 400 | 400 | 用户名已存在 |
+| 400 | 400 | 原密码错误 |
+
+### 批量导入学生（Excel）
+
+教师可通过上传 Excel 文件批量创建学生信息和本地登录账号。
+
+**流程：**
+1. 教师登录系统 → 进入学生管理 → 上传 Excel
+2. 按模板格式填写学生信息（学号、姓名、专业、初始密码等）
+3. 上传完成后，系统自动创建 `t_student` 和 `t_local_user` 记录
+4. 学生使用**学号**作为用户名，使用导入时设置的密码登录
+
+**登录双模式支持：**
+
+本地登录接口 `/api/auth/login` 同时支持两种方式：
+- **用户名登录**：使用 `t_local_user.username` 匹配
+- **学号登录**：当用户名匹配失败时，自动通过 `t_local_user.user_no` 与角色(student) 查找
+
+**Excel 模板格式：**
+
+| 学号 | 姓名 | 性别 | 院系代码 | 院系名称 | 专业代码 | 专业名称 | 班级代码 | 班级名称 | 初始密码 |
+|:---|:---|:---|:---|:---|:---|:---|:---|:---|:---|
+
+> 初始密码列可选，留空则使用请求参数中的 `defaultPassword`（默认 Neusoft@2026）
+
+**接口：** `POST /api/student/batch-import`（需教师 Token）
+
+**核心源码：**
+- `service/impl/LocalAuthServiceImpl.batchImportStudents()` — Excel 解析 + 批量创建
+- `dto/BatchImportResult.java` — 导入结果
+- `dto/StudentBatchImportRequest.java` — 请求参数
+
+---
+
+## 附录：Docker 一键部署
+
+### 前置条件
+
+- Docker Engine ≥ 24.x
+- Docker Compose Plugin（`docker compose` 命令）
+- 至少 8GB 可用内存（推荐 16GB）
+- 至少 20GB 可用磁盘空间
+
+### 目录结构
+
+```
+grading_knowledge/
+├── docker-compose.yml        # 主编排文件
+├── .env.example              # 环境变量模板（cp 后编辑）
+├── deploy/
+│   └── nginx.conf            # Nginx 反向代理配置
+├── backend/
+│   └── Dockerfile            # Spring Boot 多阶段构建
+├── ai_service/
+│   └── Dockerfile            # Python FastAPI 镜像
+├── frontend/
+│   └── Dockerfile            # Vue 3 构建 + Nginx 托管
+└── docs/
+    └── database_schema_v3.sql # 自动初始化脚本
+```
+
+### Docker Compose 服务拓扑
+
+```
+┌─────────────┐      ┌──────────────┐      ┌──────────────┐
+│   minio:9000 │      │   redis:6379 │      │  milvus:19530│
+└─────────────┘      └──────────────┘      └──────────────┘
+        ↑                      ↑                      ↑
+        │                      │                      │
+┌───────┴──────────────────────┴──────────────────────┴───────┐
+│                     grading-net (bridge)                      │
+├─────────────┐  ┌──────────────┐  ┌──────────────────────────┤
+│ mysql:3306  │  │  backend:8080│  │  ai-service:8000          │
+│ (init-db)   │  │  Spring Boot │  │  FastAPI + PaddleOCR      │
+└─────────────┘  └──────┬───────┘  └────────────────┬─────────┘
+                         │                           │
+                ┌────────┴──────────┐                │
+                │   frontend:80     │────────────────┘
+                │  Nginx 反向代理    │
+                └────────┬──────────┘
+                         │
+                    ┌────┴────┐
+                    │  用户    │
+                    └─────────┘
+```
+
+### 构建与启动
+
+```bash
+# 1. 生成后端 jar 包（首次需要）
+cd backend && mvn package -DskipTests && cd ..
+
+# 2. 配置环境变量
+cp .env.example .env
+# 编辑 .env 填入 DEEPSEEK_API_KEY
+
+# 3. 构建并启动
+docker compose up -d --build
+
+# 4. 等待所有服务就绪（约 30-60 秒）
+docker compose ps
+
+# 首次启动后，数据库会自动初始化（docs/database_schema_v3.sql）
+# 默认管理员账户：admin / Admin@123
+```
+
+### 查看日志
+
+```bash
+# 实时跟踪所有服务
+docker compose logs -f
+
+# 只看后端
+docker compose logs -f backend
+
+# 只看 AI 服务
+docker compose logs -f ai-service
+```
+
+### 停止与清理
+
+```bash
+# 正常停止（数据不丢失）
+docker compose down
+
+# 完全清理（删除所有数据）
+docker compose down -v
+rm -rf backend/target
+```
+
+### 生产环境注意事项
+
+- 修改 `application.yml` 中 `cas.mock` 为 `false`，配置真实 CAS 地址
+- 在 `.env` 中设置强密码（MYSQL_ROOT_PASSWORD、MINIO_ROOT_PASSWORD）
+- 使用外部 HTTPS 反向代理（如 Nginx/Caddy）终止 TLS
+- AI 服务建议部署在 GPU 节点，启用 PaddleOCR GPU 版本
+- Milvus 生产环境建议使用独立 etcd 和存储
+- 定期备份 `mysql-data` 和 `minio-data` 数据卷
 
 ---
 

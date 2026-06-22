@@ -310,3 +310,106 @@
 
 - FastAPI AI/OCR 算法服务模块（Python 端）
 - 前端 Vue 3 模块
+
+---
+
+## 2026-06-16 — AI/OCR 算法服务模块（Python FastAPI）
+
+### 目标
+
+根据开发文档第 3 节实现 AI/OCR 算法服务模块，包含配置管理、数据模型、OCR 图文解析、RAG 评分标准检索、LLM 深度分析、结果持久化、评测编排管道、API 路由、评分标准处理、主应用入口共 10 个子模块。所有代码添加完整中文注释。
+
+### 新增文件
+
+| 文件路径 | 行数 | 说明 |
+|:---|:---|:---|
+| `app/config.py` | 98 | 全局配置模块 — MySQL/Redis/MinIO/Milvus/DeepSeek/Ollama 连接参数 |
+| `app/models/schemas.py` | 126 | Pydantic 数据模型 — TaskStatus 枚举、请求/响应体、内部 DTO |
+| `app/services/ocr_service.py` | 307 | OCR 图文解析子模块 — MinIO 下载 + .docx 解析 + PaddleOCR 识别 + .pdf 解析 |
+| `app/services/rag_service.py` | 177 | RAG 评分标准检索子模块 — Embedding 向量化 + Milvus 相似度检索 |
+| `app/services/llm_service.py` | 209 | LLM 深度分析子模块 — DeepSeek/Ollama 自适应切换 + 分数解析 |
+| `app/services/persistence.py` | 249 | 结果持久化模块 — Redis 状态机 + MySQL 读写 |
+| `app/services/eval_pipeline.py` | 129 | 评测编排管道 — 串联 OCR→RAG→LLM 全流程 |
+| `app/services/standard_service.py` | 260 | 评分标准处理服务 — 文档切片 + Embedding + Milvus 写入 |
+| `app/api/routes.py` | 77 | API 路由模块 — `/ai/eval/submit` 和 `/ai/health` 接口 |
+| `app/main.py` | 90 | FastAPI 应用主入口 — 应用配置 + 生命周期管理 + Uvicorn 启动 |
+| `app/api/__init__.py` | 2 | API 模块导出 |
+| `app/services/__init__.py` | 7 | 服务模块导出 |
+| `app/models/__init__.py` | 6 | 数据模型导出 |
+| `requirements.txt` | 25 | Python 依赖清单 |
+
+### 核心设计
+
+**评测编排管道（eval_pipeline.py）**：
+- 串联 OCR → RAG → LLM 全流程，通过 Redis 更新任务状态机（10→20→30→40→50）
+- 异步执行：`asyncio.create_task()` 在后台运行，API 立即返回 task_id
+- 异常安全：任意阶段失败时 Redis 状态设为 -1，MySQL 状态回退为 0
+
+**OCR 图文解析（ocr_service.py）**：
+- 从 MinIO 下载 .zip/.docx/.pdf 文件到临时目录
+- 使用 python-docx 解析 .docx，提取段落文本 + 嵌入图片
+- 使用 PaddleOCR 识别截图中的文字（置信度阈值 0.5）
+- OCR 结果按图片出现顺序原位插入到对应段落位置
+- 可选提取代码包 README 作为补充信息
+
+**RAG 评分标准检索（rag_service.py）**：
+- 使用 bge-large-zh-v1.5（1024 维）将报告文本向量化
+- 在 Milvus 中执行 HNSW 向量检索 + 标量过滤（course_id + stage）
+- 返回 Top-K 相关评分标准切片，拼接为 System Prompt 上下文
+
+**LLM 深度分析（llm_service.py）**：
+- 模型路由：读取 Redis 降级开关，决定使用 DeepSeek API 或 Ollama 本地模型
+- DeepSeek 失败时自动降级到 Ollama
+- 支持联合评审上下文（上一阶段教师终审评语）
+- 正则解析 LLM 输出中的分数，支持多种格式
+
+**评分标准处理（standard_service.py）**：
+- 教师上传评分标准文档后，解析提取纯文本
+- 按 500 字符切片（50 字符重叠），Embedding 向量化后写入 Milvus
+- 覆盖更新：先删除该课程该阶段的旧数据，再插入新数据
+
+### 接口定义
+
+| 接口 | 方法 | 路径 | 说明 |
+|:---|:---|:---|:---|
+| 接收评测任务 | `POST` | `/ai/eval/submit` | 接收 `{task_id, student_no, course_id, stage}`，异步执行评测 |
+| 健康检查 | `GET` | `/ai/health` | Java 端心跳探针，检测 FastAPI 服务存活 |
+
+### 启动方式
+
+```bash
+# 开发模式（热重载）
+cd ai_service && python -m app.main
+
+# 生产模式
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+```
+
+### 测试方式
+
+- 启动 FastAPI 服务后，访问 `http://localhost:8000/docs` 查看 Swagger UI
+- 使用 `POST /ai/eval/submit` 发送评测任务，检查 Redis 状态机变化
+- 使用 `GET /ai/health` 检查服务存活状态
+- 检查 MySQL `t_submission_stage` 表 `status` 和 `ai_score` 字段变化
+
+### 技术依赖
+
+| 包名 | 版本 | 用途 |
+|:---|:---|:---|
+| fastapi | 0.111.0 | 异步 Web 框架 |
+| uvicorn[standard] | 0.30.1 | ASGI 服务器 |
+| openai | 1.35.0 | DeepSeek API（OpenAI 兼容接口） |
+| ollama | 0.2.1 | 本地私有化模型调用 |
+| paddleocr | 2.8.1 | OCR 图文识别 |
+| pymilvus | 2.4.4 | Milvus 向量数据库客户端 |
+| sentence-transformers | 2.7.0 | Embedding 模型加载 |
+| python-docx | 1.1.2 | .docx 文档解析 |
+| redis[hiredis] | 5.0.8 | Redis 客户端 |
+| pymysql | 1.1.1 | MySQL 客户端 |
+| minio | 7.2.7 | MinIO 对象存储客户端 |
+
+---
+
+## 后续待实现模块
+
+- 前端 Vue 3 模块

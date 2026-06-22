@@ -1,0 +1,186 @@
+# ============================================================================
+# 双轨制 AI 评分系统 — Docker Compose 一键部署
+# 使用方法：
+#   1. cp .env.example .env  (修改环境变量)
+#   2. docker compose up -d  (启动所有服务)
+#   3. 访问 http://localhost  (前端入口)
+# ============================================================================
+
+services:
+  # ==================== 基础设施 ====================
+
+  mysql:
+    image: mysql:8.0
+    container_name: grading-mysql
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-NeusoftGrading@2026}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-neusoft_ai_grading}
+      MYSQL_CHARSET: utf8mb4
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./docs/database_schema_v3.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_general_ci
+      --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - grading-net
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: grading-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - grading-net
+
+  minio:
+    image: minio/minio:RELEASE.2024-05-10T01-41-38Z
+    container_name: grading-minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin@2026}
+    volumes:
+      - minio-data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - grading-net
+
+  milvus:
+    image: milvusdb/milvus:v2.4.1
+    container_name: grading-milvus
+    restart: unless-stopped
+    ports:
+      - "19530:19530"
+    environment:
+      ETCD_USE_EMBED: "true"
+      COMMON_STORAGETYPE: local
+    volumes:
+      - milvus-data:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - grading-net
+
+  # ==================== 业务服务 ====================
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: grading-backend
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/neusoft_ai_grading?useUnicode=true&characterEncoding=utf8mb4&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD:-NeusoftGrading@2026}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin@2026}
+      CAS_MOCK: "true"
+      AI_SERVICE_BASE_URL: http://ai-service:8000
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    networks:
+      - grading-net
+
+  ai-service:
+    build:
+      context: ./ai_service
+      dockerfile: Dockerfile
+    container_name: grading-ai-service
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-NeusoftGrading@2026}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-neusoft_ai_grading}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin@2026}
+      MILVUS_HOST: milvus
+      MILVUS_PORT: 19530
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEBUG: "false"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+    networks:
+      - grading-net
+
+  # ==================== 前端 + 反向代理 ====================
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: grading-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+      - ai-service
+    networks:
+      - grading-net
+
+# ==================== 数据卷 ====================
+volumes:
+  mysql-data:
+  redis-data:
+  minio-data:
+  milvus-data:
+
+# ==================== 网络 ====================
+networks:
+  grading-net:
+    driver: bridge

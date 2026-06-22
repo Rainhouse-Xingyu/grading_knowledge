@@ -100,3 +100,30 @@ CREATE TABLE `t_submission_stage` (
   UNIQUE KEY `uk_stu_course_stage` (`student_no`,`course_id`,`stage_num`),
   KEY `idx_course_stage` (`course_id`,`stage_num`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='三阶段分段提交与AI/教师双轨评审主表';
+
+-- ============================================================================
+-- 6. 本地登录用户表（与CAS登录并行的独立认证方式）
+-- ============================================================================
+
+DROP TABLE IF EXISTS `t_local_user`;
+CREATE TABLE `t_local_user` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `username` varchar(32) NOT NULL COMMENT '登录用户名（全局唯一）',
+  `password_hash` varchar(100) NOT NULL COMMENT 'BCrypt哈希后的密码（60字符，含盐）',
+  `role` varchar(16) NOT NULL COMMENT '角色: student/teacher/admin',
+  `user_no` varchar(32) DEFAULT NULL COMMENT '关联用户编号（student→学号，teacher→工号，admin→NULL）',
+  `status` tinyint NOT NULL DEFAULT '0' COMMENT '账户状态: 0-正常, 1-锁定(管理员手动锁定)',
+  `login_fail_count` int NOT NULL DEFAULT '0' COMMENT '连续登录失败次数（成功登录后重置为0）',
+  `locked_until` datetime DEFAULT NULL COMMENT '账户锁定截止时间（连续失败5次自动锁定30分钟）',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '首次注册时间',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后修改时间',
+  `last_login_time` datetime DEFAULT NULL COMMENT '最后登录时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_username` (`username`),
+  KEY `idx_role` (`role`),
+  KEY `idx_user_no` (`user_no`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='本地登录用户表（与CAS并行的独立认证方式）';
+
+-- 默认管理员账户（密码: Admin@123，BCrypt加密）
+INSERT INTO `t_local_user` (`username`, `password_hash`, `role`, `user_no`, `status`)
+VALUES ('admin', '$2a$12$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'admin', NULL, 0);

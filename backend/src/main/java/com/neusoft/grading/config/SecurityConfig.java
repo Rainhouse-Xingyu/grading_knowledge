@@ -26,8 +26,10 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        // CAS 回调和公开接口
+                        // 本地登录 & CAS 回调 & 公开接口
+                        .requestMatchers("/api/auth/login").permitAll()
                         .requestMatchers("/api/auth/cas/callback").permitAll()
+                        .requestMatchers("/api/auth/lock-status").permitAll()
                         // Knife4j / Swagger
                         .requestMatchers("/swagger-ui.html", "/v3/api-docs/**", "/doc.html/**", "/webjars/**").permitAll()
                         // Actuator 健康检查

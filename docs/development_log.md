@@ -413,3 +413,104 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
 ## 后续待实现模块
 
 - 前端 Vue 3 模块
+
+---
+
+## 2026-06-22 — 模块合计 学生批量导入 + 教师管理 + 基础设施完善
+
+### 目标
+
+根据开发文档附录"批量导入学生（Excel）" 补全学生/教师管理功能，配置 Spring Security 安全框架，完善 Docker 一键部署配置。
+
+### 新增文件
+
+| 文件路径 | 说明 |
+|:---|:---|
+| `controller/StudentController.java` | 学生管理控制器 — CRUD + **Excel 批量导入**（`POST /api/student/batch-import`） |
+| `controller/TeacherController.java` | 教师管理控制器 — CRUD |
+| `service/StudentService.java` | 学生服务接口 |
+| `service/impl/StudentServiceImpl.java` | 学生服务实现 |
+| `service/TeacherService.java` | 教师服务接口 |
+| `service/impl/TeacherServiceImpl.java` | 教师服务实现 |
+| `service/CourseProjectService.java` | 课程项目服务接口 |
+| `service/impl/CourseProjectServiceImpl.java` | 课程项目服务实现 |
+| `service/SubmissionStageService.java` | 提交阶段服务接口 |
+| `service/impl/SubmissionStageServiceImpl.java` | 提交阶段服务实现 |
+| `service/StudentCourseService.java` | 选课服务接口 |
+| `service/impl/StudentCourseServiceImpl.java` | 选课服务实现 |
+| `config/SecurityConfig.java` | Spring Security 安全配置 — CAS 回调 + 登录接口放行，其余需 Token 认证 |
+| `dto/BatchImportResult.java` | 批量导入结果响应体 |
+| `dto/StudentBatchImportRequest.java` | 批量导入请求参数 |
+| `filter/TokenAuthFilter.java` | Token 认证过滤器 — 从请求头提取 Token，校验 Redis 会话 |
+| `deploy/nginx.conf` | Nginx 反向代理配置 — 前端静态资源 + `/api/` → Backend + `/ai/` → AI Service |
+
+### 改动文件
+
+| 文件 | 改动要点 |
+|:---|:---|
+| `service/impl/LocalAuthServiceImpl.java` | 新增 `batchImportStudents()` — Excel 解析 + 批量创建 `t_student` 和 `t_local_user` 记录，支持学号/用户名双模式登录 |
+| `controller/TeacherController.java` | 教师 CRUD 接口 |
+| `docker-compose.yml` | 完整编排 7 个服务（mysql / redis / minio / milvus / backend / ai-service / frontend），挂载 `deploy/nginx.conf`，配置健康检查 |
+
+### 接口补充
+
+| 接口 | 方法 | 路径 | 说明 |
+|:---|:---|:---|:---|
+| 批量导入学生 | `POST` | `/api/student/batch-import` | 上传 Excel，自动创建学生信息 + 本地登录账号 |
+| 查询所有学生 | `GET` | `/api/student` | 学生列表 |
+| 新增学生 | `POST` | `/api/student` | 单条新增 |
+| 更新学生 | `PUT` | `/api/student` | 更新学生信息 |
+| 删除学生 | `DELETE` | `/api/student/{studentNo}` | 按学号删除 |
+
+### 核心设计
+
+**批量导入流程**：
+1. 接收 `.xlsx` / `.xls` Excel 文件
+2. 解析模板字段（学号、姓名、性别、院系、专业、班级、初始密码）
+3. 逐行创建 `t_student` 记录（已存在则跳过）和 `t_local_user` 记录（用户名 = 学号）
+4. 初始密码列留空时使用 `defaultPassword`（默认 `Neusoft@2026`）
+5. 可选关联 `courseId`，导入时自动创建 `t_student_course` 选课记录
+6. 返回 `BatchImportResult`：成功数、失败数、失败详情列表
+
+**Docker 部署拓扑**（7 服务 4 数据卷）：
+- `grading-net` 桥接网络连接所有服务
+- `mysql` 自动挂载 `database_schema_v3.sql` 初始化
+- `frontend` 使用 Nginx 托管前端静态资源，代理 `/api/*` → backend:8080、`/ai/*` → ai-service:8000
+- 数据卷持久化：`mysql-data` / `redis-data` / `minio-data` / `milvus-data`
+
+---
+
+## 系统开发现状总览
+
+### ✅ 已完成模块
+
+| 模块 | 说明 | 完成日期 |
+|:---|:---|:---|
+| **2.2.1 认证授权** `auth` | CAS 统一身份认证 + 本地登录双模式（BCrypt 密码哈希、暴力破解防护） | 2026-06-15 |
+| **2.2.2 文件上传与管理** `file` | MinIO 私有化存储、UUID 混淆路径、Redisson 分布式锁防重 | 2026-06-15 |
+| **2.2.3 AI 评测触发与任务管理** `eval` | 批量/单人触发、Redis 任务状态机（10→50）、配额控制与降级、异步投递 FastAPI | 2026-06-16 |
+| **2.2.4 评语微调与分数管理** `review` | 教师在线修改 Markdown 评语、覆盖 AI 分数 | 2026-06-16 |
+| **2.2.5 用户与课程管理** `user` | 课程学生列表、三阶段进度、期末总分查询 | 2026-06-16 |
+| **4.3 评分标准上传** `standard` | 教师上传评分标准文档到 MinIO + 触发 FastAPI 切片写入 Milvus | 2026-06-16 |
+| **学生管理** `student` | CRUD + Excel 批量导入（含自动创建本地登录账号） | 2026-06-22 |
+| **教师管理** `teacher` | CRUD | 2026-06-22 |
+| **Spring Security 安全框架** | `SecurityConfig` + `TokenAuthFilter`，Token 认证拦截 | 2026-06-22 |
+| **Docker 部署** | 7 服务编排 + Nginx 反向代理 + 数据卷持久化 | 2026-06-22 |
+| **3. AI/OCR 算法服务（FastAPI）** | 10 个子模块全部实现（OCR → RAG → LLM 全链路） | 2026-06-16 |
+
+### ❌ 尚未开发模块
+
+| 模块 | 说明 | 优先级 |
+|:---|:---|:---|
+| **1. 前端 Vue 3 模块** | `frontend/` 目录仅有 Dockerfile，无任何 Vue 源码 | **高** |
+| 　1.2.1 认证登录模块 | CAS 登录 + 本地登录（标签切换）、路由守卫 | — |
+| 　1.2.2 学生提交面板 | 文件上传、三阶段状态展示、PDF 在线预览 | — |
+| 　1.2.3 教师工作台（核心） | 全班列表、评审触发、进度轮询、评语微调、分数覆盖、一键下发 | — |
+| 　1.2.4 PDF 报告导出 | 报告下载按钮 | — |
+
+### ⚠️ 待完善的点（TODO）
+
+| 位置 | 问题 | 说明 |
+|:---|:---|:---|
+| `StandardServiceImpl.triggerFastApiProcessing()` | **空桩** | Java 端评分标准上传后，触发 FastAPI `/ai/standard/process` 的 HTTP 调用尚未实现（仅打印日志）|
+| `StandardServiceImpl.getStandardInfo()` | **切片数量固定为 0** | `chunkCount` 硬编码为 0，需从 Milvus 查询实际切片数 |

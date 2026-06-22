@@ -1,9 +1,7 @@
 package com.neusoft.grading.service;
 
-import com.neusoft.grading.dto.ChangePasswordRequest;
-import com.neusoft.grading.dto.LocalLoginRequest;
-import com.neusoft.grading.dto.LocalRegisterRequest;
-import com.neusoft.grading.dto.LoginResponse;
+import com.neusoft.grading.dto.*;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * 本地登录认证服务接口
@@ -14,34 +12,41 @@ import com.neusoft.grading.dto.LoginResponse;
 public interface LocalAuthService {
 
     /**
-     * 本地用户名密码登录
-     *
-     * @param request 登录请求（用户名 + 密码）
-     * @return 登录响应（Token + 角色 + 用户信息）
-     * @throws com.neusoft.grading.common.BizException 登录失败时抛出
+     * 本地用户名密码登录（支持学号直接登录）
      */
     LoginResponse login(LocalLoginRequest request);
 
     /**
      * 注册本地用户（仅管理员可操作）
-     *
-     * @param request 注册请求
      */
     void register(LocalRegisterRequest request);
 
     /**
      * 修改密码
-     *
-     * @param username  当前用户名
-     * @param request   修改密码请求
      */
     void changePassword(String username, ChangePasswordRequest request);
 
     /**
      * 检查账户是否被锁定
-     *
-     * @param username 用户名
-     * @return 锁定剩余秒数，0 表示未锁定
      */
     long checkLocked(String username);
+
+    /**
+     * 通过用户编号和角色解析本地用户名（用于 change-password 接口）
+     *
+     * @param userNo 用户编号（学号/工号）
+     * @param role   角色
+     * @return 本地登录用户名，找不到时返回 userNo 本身作为降级
+     */
+    String resolveUsername(String userNo, String role);
+
+    /**
+     * 批量导入学生信息并创建本地登录账户
+     *
+     * @param file           上传的 Excel 文件
+     * @param defaultPassword 统一默认密码（当 Excel 中某行密码为空时使用）
+     * @param courseId        课程 ID（可选，自动将该批学生选入课程）
+     * @return 导入结果（成功数 + 失败详情）
+     */
+    BatchImportResult batchImportStudents(MultipartFile file, String defaultPassword, String courseId);
 }

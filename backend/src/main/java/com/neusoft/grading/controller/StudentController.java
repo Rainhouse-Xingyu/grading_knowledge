@@ -1,12 +1,15 @@
 package com.neusoft.grading.controller;
 
 import com.neusoft.grading.common.Result;
+import com.neusoft.grading.dto.BatchImportResult;
 import com.neusoft.grading.entity.Student;
+import com.neusoft.grading.service.LocalAuthService;
 import com.neusoft.grading.service.StudentService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -17,6 +20,7 @@ import java.util.List;
 public class StudentController {
 
     private final StudentService studentService;
+    private final LocalAuthService localAuthService;
 
     @Operation(summary = "查询所有学生")
     @GetMapping
@@ -46,5 +50,28 @@ public class StudentController {
     @DeleteMapping("/{studentNo}")
     public Result<Boolean> delete(@PathVariable String studentNo) {
         return Result.ok(studentService.removeById(studentNo));
+    }
+
+    // ==================== 批量导入 ====================
+
+    @Operation(summary = "批量导入学生（Excel）并创建本地登录账号")
+    @PostMapping("/batch-import")
+    public Result<BatchImportResult> batchImport(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "defaultPassword", required = false, defaultValue = "Neusoft@2026") String defaultPassword,
+            @RequestParam(value = "courseId", required = false) String courseId) {
+
+        if (file.isEmpty()) {
+            return Result.fail(400, "上传文件为空");
+        }
+
+        // 校验文件格式
+        String filename = file.getOriginalFilename();
+        if (filename == null || !(filename.endsWith(".xlsx") || filename.endsWith(".xls"))) {
+            return Result.fail(400, "仅支持 .xlsx 或 .xls 格式的 Excel 文件");
+        }
+
+        BatchImportResult result = localAuthService.batchImportStudents(file, defaultPassword, courseId);
+        return Result.ok(result);
     }
 }

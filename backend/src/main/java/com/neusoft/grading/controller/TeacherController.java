@@ -1,12 +1,15 @@
 package com.neusoft.grading.controller;
 
 import com.neusoft.grading.common.Result;
+import com.neusoft.grading.dto.BatchImportResult;
 import com.neusoft.grading.entity.Teacher;
+import com.neusoft.grading.service.LocalAuthService;
 import com.neusoft.grading.service.TeacherService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -17,6 +20,7 @@ import java.util.List;
 public class TeacherController {
 
     private final TeacherService teacherService;
+    private final LocalAuthService localAuthService;
 
     @Operation(summary = "查询所有教师")
     @GetMapping

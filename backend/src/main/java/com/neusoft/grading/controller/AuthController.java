@@ -50,11 +50,15 @@ public class AuthController {
         if (token == null) {
             return Result.fail(401, "未登录");
         }
+
         UserInfoResponse info = authService.getUserInfo(token);
         if (info == null) {
             return Result.fail(401, "Token 无效或已过期");
         }
-        localAuthService.changePassword(info.getUserNo(), body);
+
+        // 通过 userNo 解析本地用户名
+        String username = localAuthService.resolveUsername(info.getUserNo(), info.getRole());
+        localAuthService.changePassword(username, body);
         return Result.ok();
     }
 
@@ -105,9 +109,6 @@ public class AuthController {
         return Result.ok(info);
     }
 
-    /**
-     * 从 Authorization 请求头提取 Token
-     */
     private String extractToken(HttpServletRequest request) {
         String header = request.getHeader(AUTH_HEADER);
         if (header != null && header.startsWith(TOKEN_PREFIX)) {
